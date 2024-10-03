@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "vlc"
+version = "0.1.0"
+description = ""
+authors = ["Morgan Brooks <morgan@morganbrooks.io"]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+pandas = "^2.2.3"
+datefinder = "^0.7.3"
+thefuzz = "^0.22.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
