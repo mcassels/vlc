@@ -4,10 +4,11 @@ import datefinder
 from datetime import datetime
 from thefuzz import fuzz
 from typing import NamedTuple, Union, List
+import pandas
 
 class Expiry(NamedTuple):
     name: str
-    expiry: datetime
+    expiry: Union[datetime, None]
 
 def get_crc_expiries() -> list[Expiry]:
     volunteers = []
@@ -19,13 +20,21 @@ def get_crc_expiries() -> list[Expiry]:
         if not volunteer:
             print(f"Skipping {f.name}; could not extract volunteer name")
 
-        rest = f.name.removeprefix(volunteer + ' - ')
-        dates = list(datefinder.find_dates(rest))
-        if len(dates) != 1:
-            print(f"Skipping {f.name}; could not extract expiry date")
-            continue
+        expiry = None
+        for subf in scandir(f.path):
+            if not subf.is_file():
+                continue
 
-        volunteers.append(Expiry(volunteer, dates[0]))
+            name = subf.name.lower()
+            split = name.split(' exp ')
+            if len(split) != 2:
+                continue
+            dates = list(datefinder.find_dates(split[1]))
+            if len(dates) != 1:
+                continue
+            expiry = dates[0]
+
+        volunteers.append(Expiry(volunteer, expiry))
     return volunteers
 
 def find_closest(name: str, expiries: list[Expiry]) -> tuple[int, Expiry]:
@@ -38,15 +47,38 @@ def get_all_names_ordered():
     df['name'] = df.apply(lambda x: f"{x.FirstName} {x.LastNameNew}", axis=1)
     return list(df['name'])
 
-def main():
+def get_row_crc_expiry(name: str, expiries: list[Expiry]) -> Union[str, None]:
+    [ratio, expiry] = find_closest(name, expiries)
+    if expiry.expiry is not None and ratio > 80:
+        return expiry.expiry.strftime("%m/01/%Y")
+    return None
+
+def add_crc_columns(df: pandas.DataFrame) -> pandas.DataFrame:
     expiries = get_crc_expiries()
-    names = get_all_names_ordered()
-    ordered_expiries = []
-    for name in names:
-        [ratio, expiry] = find_closest(name, expiries)
-        formatted_date = expiry.expiry.strftime("%m/01/%Y")
-        print(f"name: {name}, expiry name: {expiry.name} expiry: {formatted_date}, ratio: {ratio}")
-        ordered_expiries.append({ "name": name, "expiry_name": expiry.name, "crc_expiry_date": expiry.expiry.strftime("%m/01/%YYYY") })
+    df['CRC Expiry'] = df.apply(lambda x: get_row_crc_expiry(f"{x.FirstName} {x.LastNameNew}", expiries), axis=1)
+    df['Qualification: CRC'] = df['CRC Expiry'].apply(lambda x: "Yes" if x is not None else "No")
+    return df
+
+"""
+TODO:
+1. add CRC information
+2. replace LastName with LastNameNew
+3. Format phone numbers
+4. Fill in date joined with dummy 01-01-1999 values and format date joined
+5. Fill in legal first name with first name
+6. Fill in all required fields with "please update"
+7. Write out file with correct column order.
+
+Also:
+- Check for duplicates
+- Check for valid values for all multiple choice fields
+
+"""
+
+def main():
+    df = pandas.read_excel("data/vlc_import_file.xlsx")
+    df = add_crc_columns(df)
+
 
 if __name__ == '__main__':
     main()
