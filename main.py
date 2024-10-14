@@ -86,23 +86,6 @@ def please_update_if_empty(df: pandas.DataFrame, colName: str) -> pandas.DataFra
     df[colName] = df[colName].apply(lambda x: x if x is not None and not pandas.isna(x) else "please update")
     return df
 
-"""
-Data cleaning steps:
-1. add CRC information
-2. replace LastName with LastNameNew
-3. Format phone numbers
-4. Fill in date joined with dummy 01-01-1999 values and format date joined
-5. Fill in legal first name with first name
-6. Fill in all required fields with "please update"
-7. Clean categorical column values
-8. Write out file with correct column order.
-
-Data validation steps:
-1. Check for valid values for multiple choice fields
-2. Check for duplicates
-
-"""
-
 def assert_col_valid(df: pandas.DataFrame, col: str, valid_vals: str):
     num_invalid = len(df[(~pandas.isna(df[col])) & (~df[col].isin(valid_vals))])
     assert num_invalid == 0
@@ -235,6 +218,28 @@ def clean_neighbourhood(val: Any) -> str|None:
             return neighbourhood
     return val
 
+def check_duplicates(df: pandas.DataFrame):
+    # No duplicate names
+    df['full_name'] = df.apply(lambda x: f"{x['FirstName']} {x['LastName']}", axis=1)
+    assert df['full_name'].nunique() == len(df)
+    # no duplicate emails
+    assert len(df[~pandas.isna(df['EmailAddress'])]) == df[~pandas.isna(df['EmailAddress'])]['EmailAddress'].nunique()
+    # no duplicate phone numbers
+    assert len(df[~pandas.isna(df['HomePhone'])]) == df[~pandas.isna(df['HomePhone'])]['HomePhone'].nunique()
+
+"""
+Data cleaning steps:
+1. add CRC information
+2. replace LastName with LastNameNew
+3. Format phone numbers
+4. Fill in date joined with dummy 01-01-1999 values and format date joined
+5. Fill in legal first name with first name
+6. Fill in all required fields with "please update"
+7. Clean categorical column values
+8. Enforce that categorical columns have valid values
+9. Check for duplicate names
+10. Write out file with correct column order.
+"""
 def main():
     df = pandas.read_excel("data/vlc_import_file.xlsx")
     df = add_crc_columns(df)
@@ -264,7 +269,9 @@ def main():
     df["Preferred Learner Age Group"] = df["Preferred Learner Age Group"].apply(clean_learner_age_group)
     df["Preferred Tutoring Format"] = df["Preferred Tutoring Format"].apply(clean_tutoring_format)
     df["Neighbourhood"] = df["Neighbourhood"].apply(clean_neighbourhood)
+
     data_validation(df)
+    check_duplicates(df)
     write_output(df)
 
 
