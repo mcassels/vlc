@@ -3,8 +3,9 @@ from os import scandir
 import datefinder
 from datetime import datetime
 from thefuzz import fuzz
-from typing import NamedTuple, Union, List
+from typing import NamedTuple, Union, Any
 import pandas
+import re
 
 class Expiry(NamedTuple):
     name: str
@@ -59,8 +60,34 @@ def add_crc_columns(df: pandas.DataFrame) -> pandas.DataFrame:
     df['Qualification: CRC'] = df['CRC Expiry'].apply(lambda x: "Yes" if x is not None else "No")
     return df
 
+def clean_phone_number(phone: Any) -> str|None:
+    if phone is None or pandas.isna(phone):
+        return None
+
+    return re.sub(r'\D', '', str(phone))
+
+def clean_phone_numbers(df: pandas.DataFrame) -> pandas.DataFrame:
+    df['HomePhone'] = df['HomePhone'].apply(clean_phone_number)
+    df['CellPhone'] = df['CellPhone'].apply(clean_phone_number)
+    df['WorkPhone'] = df['WorkPhone'].apply(clean_phone_number)
+    return df
+
+def format_date(date: Any) -> str:
+    if date is None or pandas.isna(date):
+        return "01/01/1999"
+    return date.strftime("%m/%d/%Y")
+
+def clean_date_joined(df: pandas.DataFrame) -> pandas.DataFrame:
+    df['DateJoined'] = pandas.to_datetime(df['DateJoined'])
+    df['DateJoined'] = df['DateJoined'].apply(format_date)
+    return df
+
+def please_update_if_empty(df: pandas.DataFrame, colName: str) -> pandas.DataFrame:
+    df[colName] = df[colName].apply(lambda x: x if x is not None and not pandas.isna(x) else "please update")
+    return df
+
 """
-TODO:
+Data cleaning steps:
 1. add CRC information
 2. replace LastName with LastNameNew
 3. Format phone numbers
@@ -69,15 +96,63 @@ TODO:
 6. Fill in all required fields with "please update"
 7. Write out file with correct column order.
 
-Also:
-- Check for duplicates
-- Check for valid values for all multiple choice fields
+Data validation steps:
+1. Check for valid values for multiple choice fields
+2. Check for duplicates
 
 """
 
 def main():
     df = pandas.read_excel("data/vlc_import_file.xlsx")
     df = add_crc_columns(df)
+    df['LastName'] = df['LastNameNew']
+    df = clean_phone_numbers(df)
+    df = clean_date_joined(df)
+    df['LegalFirstName'] = df.apply(lambda x: x['LegalFirstName'] if x['LegalFirstName'] is not None and not pandas.isna(x['LegalFirstName']) else x['FirstName'], axis=1)
+
+    required_columns = [
+        "FirstName",
+        "LastName",
+        "Address1",
+        "City",
+        "Province",
+        "Country",
+        "PostalCode",
+    ]
+    for col in required_columns:
+        df = please_update_if_empty(df, col)
+
+    output_column_order = [
+        "Salutation",
+        "FirstName",
+        "LastName",
+        "MiddleName",
+        "Suffix",
+        "Pronouns",
+        "LegalFirstName",
+        "Address1",
+        "Address2",
+        "City",
+        "Province",
+        "Country",
+        "PostalCode",
+        "HomePhone",
+        "WorkPhone",
+        "WorkPhoneExt",
+        "CellPhone",
+        "EmailAddress",
+        "SecondaryEmailAddress",
+        "Birthday",
+        "DateJoined",
+        "VolunteerStatus",
+        "Preferred Learner Age Group",
+        "Preferred Tutoring Format",
+        "Neighbourhood",
+        "Qualification: CRC",
+        "CRC Expiry",
+    ]
+    df = df[output_column_order]
+    df.to_excel("formatted_import_file.xlsx", index=False)
 
 
 if __name__ == '__main__':
