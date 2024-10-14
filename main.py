@@ -94,7 +94,8 @@ Data cleaning steps:
 4. Fill in date joined with dummy 01-01-1999 values and format date joined
 5. Fill in legal first name with first name
 6. Fill in all required fields with "please update"
-7. Write out file with correct column order.
+7. Clean categorical column values
+8. Write out file with correct column order.
 
 Data validation steps:
 1. Check for valid values for multiple choice fields
@@ -102,26 +103,58 @@ Data validation steps:
 
 """
 
-def main():
-    df = pandas.read_excel("data/vlc_import_file.xlsx")
-    df = add_crc_columns(df)
-    df['LastName'] = df['LastNameNew']
-    df = clean_phone_numbers(df)
-    df = clean_date_joined(df)
-    df['LegalFirstName'] = df.apply(lambda x: x['LegalFirstName'] if x['LegalFirstName'] is not None and not pandas.isna(x['LegalFirstName']) else x['FirstName'], axis=1)
+def assert_col_valid(df: pandas.DataFrame, col: str, valid_vals: str):
+    num_invalid = len(df[(~pandas.isna(df[col])) & (~df[col].isin(valid_vals))])
+    assert num_invalid == 0
 
-    required_columns = [
-        "FirstName",
-        "LastName",
-        "Address1",
-        "City",
-        "Province",
-        "Country",
-        "PostalCode",
+
+valid_neighbourhoods = [
+    "Victoria",
+    "Oak Bay",
+    "Esquimalt/Vic West",
+    "WestShore",
+    "Sooke",
+    "S. Saanich",
+    "Central Saanich",
+    "N. Saanich",
+    "Other",
+]
+
+def data_validation(df: pandas.DataFrame):
+    valid_tutoring_formats = [
+        "in person (in public)",
+        "remote (online)",
+        "either / both",
+        "n/a (non-tutor volunteers)",
     ]
-    for col in required_columns:
-        df = please_update_if_empty(df, col)
+    valid_learner_age_groups = [
+        "child/youth (18 or younger)",
+        "adult (19 or older)",
+        "either / both",
+        "n/a (non-tutor volunteers)",
+    ]
+    valid_volunteer_statuses = [
+        "Active",
+        "Inactive",
+        "Applicant",
+        "In Process",
+        "Accepted",
+        "Inactive - Short term",
+        "Inactive - Long Term",
+        "Archived - Didn't Start",
+        "Archived - Rejected",
+        "Archived - Dismissed",
+        "Archived - Moved",
+        "Archived - Quit",
+        "Archived - Deceased",
+        "Archived - Other",
+    ]
+    assert_col_valid(df, "VolunteerStatus", valid_volunteer_statuses)
+    assert_col_valid(df, "Preferred Tutoring Format", valid_tutoring_formats)
+    assert_col_valid(df, "Preferred Learner Age Group", valid_learner_age_groups)
+    assert_col_valid(df, "Neighbourhood", valid_neighbourhoods)
 
+def write_output(df: pandas.DataFrame):
     output_column_order = [
         "Salutation",
         "FirstName",
@@ -152,7 +185,87 @@ def main():
         "CRC Expiry",
     ]
     df = df[output_column_order]
-    df.to_excel("formatted_import_file.xlsx", index=False)
+    df.to_excel("data/formatted_import_file.xlsx", index=False)
+
+
+# valid_tutoring_formats = [
+#     "in person (in public)",
+#     "remote (online)",
+#     "either / both",
+#     "n/a (non-tutor volunteers)",
+# ]
+def clean_tutoring_format(format: Any) -> str|None:
+    if pandas.isna(format) or format is None:
+        return None
+    if "online" in format:
+        return "remote (online)"
+    if "person" in format:
+        return "in person (in public)"
+    if "either" in format:
+        return "either / both"
+    if "n/a" in format:
+        return "n/a (non-tutor volunteers)"
+    return format
+
+# valid_learner_age_groups = [
+#     "child/youth (18 or younger)",
+#     "adult (19 or older)",
+#     "either / both",
+#     "n/a (non-tutor volunteers)",
+# ]
+def clean_learner_age_group(format: Any) -> str|None:
+    if pandas.isna(format) or format is None:
+        return None
+    if "child" in format:
+        return "child/youth (18 or younger)"
+    if "adult" in format:
+        return "adult (19 or older)"
+    if "either" in format:
+        return "either / both"
+    if "n/a" in format:
+        return "n/a (non-tutor volunteers)"
+    return format
+
+def clean_neighbourhood(val: Any) -> str|None:
+    if pandas.isna(format) or format is None:
+        return None
+    no_whitespace_val = re.sub(r'\s', '', str(val))
+    for neighbourhood in valid_neighbourhoods:
+        if re.sub(r'\s', '', neighbourhood) == no_whitespace_val:
+            return neighbourhood
+    return val
+
+def main():
+    df = pandas.read_excel("data/vlc_import_file.xlsx")
+    df = add_crc_columns(df)
+    df['LastName'] = df['LastNameNew']
+    df = clean_phone_numbers(df)
+    df = clean_date_joined(df)
+    df['LegalFirstName'] = df.apply(lambda x: x['LegalFirstName'] if x['LegalFirstName'] is not None and not pandas.isna(x['LegalFirstName']) else x['FirstName'], axis=1)
+
+    required_columns = [
+        "FirstName",
+        "LastName",
+        "Address1",
+        "City",
+        "Province",
+        "Country",
+        "PostalCode",
+    ]
+    for col in required_columns:
+        df = please_update_if_empty(df, col)
+
+    for col in [
+        "Preferred Learner Age Group",
+        "Preferred Tutoring Format",
+    ]:
+        df[col] = df[col].apply(lambda x: x.lower() if not pandas.isna(x) and x is not None else x)
+
+    df["Preferred Learner Age Group"] = df["Preferred Learner Age Group"].apply(clean_learner_age_group)
+    df["Preferred Tutoring Format"] = df["Preferred Tutoring Format"].apply(clean_tutoring_format)
+    df["Neighbourhood"] = df["Neighbourhood"].apply(clean_neighbourhood)
+    data_validation(df)
+    write_output(df)
 
 
 if __name__ == '__main__':
