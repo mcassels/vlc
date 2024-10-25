@@ -11,49 +11,8 @@ import googlemaps
 import os
 from shapely.geometry import Point
 import geopandas
+from common import check_duplicates, clean_phone_numbers, clean_date_joined, please_update_if_empty, assert_col_valid, valid_neighbourhoods
 
-def clean_phone_number(phone: Any) -> str|None:
-    if phone is None or pandas.isna(phone):
-        return None
-
-    return re.sub(r'\D', '', str(phone))
-
-def clean_phone_numbers(df: pandas.DataFrame) -> pandas.DataFrame:
-    df['HomePhone'] = df['HomePhone'].apply(clean_phone_number)
-    df['CellPhone'] = df['CellPhone'].apply(clean_phone_number)
-    df['WorkPhone'] = df['WorkPhone'].apply(clean_phone_number)
-    return df
-
-def format_date(date: Any) -> str:
-    if date is None or pandas.isna(date):
-        return "01/01/1999"
-    return date.strftime("%m/%d/%Y")
-
-def clean_date_joined(df: pandas.DataFrame) -> pandas.DataFrame:
-    df['DateJoined'] = pandas.to_datetime(df['DateJoined'])
-    df['DateJoined'] = df['DateJoined'].apply(format_date)
-    return df
-
-def please_update_if_empty(df: pandas.DataFrame, colName: str) -> pandas.DataFrame:
-    df[colName] = df[colName].apply(lambda x: x if x is not None and not pandas.isna(x) else "please update")
-    return df
-
-def assert_col_valid(df: pandas.DataFrame, col: str, valid_vals: str):
-    num_invalid = len(df[(~pandas.isna(df[col])) & (~df[col].isin(valid_vals))])
-    assert num_invalid == 0
-
-
-valid_neighbourhoods = [
-    "Victoria",
-    "Oak Bay",
-    "Esquimalt/Vic West",
-    "WestShore",
-    "Sooke",
-    "S. Saanich",
-    "Central Saanich",
-    "N. Saanich",
-    "Other",
-]
 
 def data_validation(df: pandas.DataFrame):
     valid_tutoring_formats = [
@@ -123,12 +82,11 @@ def write_output(df: pandas.DataFrame):
     df.to_excel("data/formatted_import_file.xlsx", index=False)
 
 
-# valid_tutoring_formats = [
-#     "in person (in public)",
-#     "remote (online)",
-#     "either / both",
-#     "n/a (non-tutor volunteers)",
-# ]
+valid_tutoring_formats = [
+    "in person (in public)",
+    "remote (online)",
+    "either / both",
+]
 def clean_tutoring_format(format: Any) -> str|None:
     if pandas.isna(format) or format is None:
         return None
@@ -138,38 +96,7 @@ def clean_tutoring_format(format: Any) -> str|None:
         return "in person (in public)"
     if "either" in format:
         return "either / both"
-    if "n/a" in format:
-        return "n/a (non-tutor volunteers)"
     return format
-
-# valid_learner_age_groups = [
-#     "child/youth (18 or younger)",
-#     "adult (19 or older)",
-#     "either / both",
-#     "n/a (non-tutor volunteers)",
-# ]
-def clean_learner_age_group(format: Any) -> str|None:
-    if pandas.isna(format) or format is None:
-        return None
-    if "child" in format:
-        return "child/youth (18 or younger)"
-    if "adult" in format:
-        return "adult (19 or older)"
-    if "either" in format:
-        return "either / both"
-    if "n/a" in format:
-        return "n/a (non-tutor volunteers)"
-    return format
-
-def check_duplicates(df: pandas.DataFrame):
-    # No duplicate names
-    df['full_name'] = df.apply(lambda x: f"{x['FirstName']} {x['LastName']}", axis=1)
-    assert df['full_name'].nunique() == len(df)
-    # no duplicate emails
-    assert len(df[~pandas.isna(df['EmailAddress'])]) == df[~pandas.isna(df['EmailAddress'])]['EmailAddress'].nunique()
-    # no duplicate phone numbers
-    assert len(df[~pandas.isna(df['HomePhone'])]) == df[~pandas.isna(df['HomePhone'])]['HomePhone'].nunique()
-
 
 def geolocate_address(address: str|None) -> Point|None:
     if address is None or pandas.isna(address):
@@ -241,9 +168,50 @@ def get_learners_with_neighbourhoods() -> pandas.DataFrame:
     gdf["neighbourhood"] = gdf['ADMIN_AREA_ABBREVIATION'].apply(get_learner_neighbourhood)
     return gdf
 
+output_column_order = [
+    "Salutation",
+    "FirstName",
+    "LastName",
+    "MiddleName",
+    "Suffix",
+    "Pronouns",
+    "LegalFirstName",
+    "Address1",
+    "Address2",
+    "City",
+    "Province",
+    "Country",
+    "PostalCode",
+    "HomePhone",
+    "WorkPhone",
+    "WorkPhoneExt",
+    "CellPhone",
+    "EmailAddress",
+    "SecondaryEmailAddress",
+    "Birthday",
+    "DateJoined",
+    "ClientStatus",
+    "Age at Intake",
+    "Tutoring Format",
+    "Neighbourhood",
+    "Parent/Guardian",
+    "Emergency Contact",
+]
+
 """
 Data cleaning steps:
-1. add neighbourhood based on geolocating address
+1. Add neighbourhood based on address
+2. Clean/format the "tutoring format" column values to contain only "online", "in-person", or "either"
+3. Use "preferred name" for "FirstName"
+4. Use the first word from "Full Legal Name" for "LegalFirstName"
+5. Use the remainder of "Full Legal Name", after the first word is removed, for "LastName"
+6. Format phone numbers
+7. Format dates (intake date and birtdate)
+8. Format phone numbers
+9. Replace empty required fields with "please update"
+10. Check for duplicate names, emails, or phone numbers
+11. Check that categorical columns only contain valid values
+12. Output file with correct column names and order
 """
 def main():
     get_learners_with_neighbourhoods()
