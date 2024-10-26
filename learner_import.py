@@ -1,9 +1,4 @@
-from pandas import read_csv
-from os import scandir
-import datefinder
-from datetime import datetime
-from thefuzz import fuzz
-from typing import NamedTuple, Union, Any
+from typing import Any
 import pandas
 import re
 from dotenv import load_dotenv
@@ -14,72 +9,15 @@ import geopandas
 from common import check_duplicates, clean_phone_numbers, clean_date_joined, please_update_if_empty, assert_col_valid, valid_neighbourhoods
 
 
-def data_validation(df: pandas.DataFrame):
-    valid_tutoring_formats = [
-        "in person (in public)",
-        "remote (online)",
-        "either / both",
-        "n/a (non-tutor volunteers)",
-    ]
-    valid_learner_age_groups = [
-        "child/youth (18 or younger)",
-        "adult (19 or older)",
-        "either / both",
-        "n/a (non-tutor volunteers)",
-    ]
-    valid_volunteer_statuses = [
-        "Active",
-        "Inactive",
+def validate_statuses(df: pandas.DataFrame):
+    valid_leaner_statuses = [
         "Applicant",
         "In Process",
         "Accepted",
-        "Inactive - Short term",
-        "Inactive - Long Term",
-        "Archived - Didn't Start",
-        "Archived - Rejected",
-        "Archived - Dismissed",
-        "Archived - Moved",
-        "Archived - Quit",
-        "Archived - Deceased",
-        "Archived - Other",
+        "Inactive",
+        "Archived",
     ]
-    assert_col_valid(df, "VolunteerStatus", valid_volunteer_statuses)
-    assert_col_valid(df, "Preferred Tutoring Format", valid_tutoring_formats)
-    assert_col_valid(df, "Preferred Learner Age Group", valid_learner_age_groups)
-    assert_col_valid(df, "Neighbourhood", valid_neighbourhoods)
-
-def write_output(df: pandas.DataFrame):
-    output_column_order = [
-        "Salutation",
-        "FirstName",
-        "LastName",
-        "MiddleName",
-        "Suffix",
-        "Pronouns",
-        "LegalFirstName",
-        "Address1",
-        "Address2",
-        "City",
-        "Province",
-        "Country",
-        "PostalCode",
-        "HomePhone",
-        "WorkPhone",
-        "WorkPhoneExt",
-        "CellPhone",
-        "EmailAddress",
-        "SecondaryEmailAddress",
-        "Birthday",
-        "DateJoined",
-        "VolunteerStatus",
-        "Preferred Learner Age Group",
-        "Preferred Tutoring Format",
-        "Neighbourhood",
-        "Qualification: CRC",
-        "CRC Expiry",
-    ]
-    df = df[output_column_order]
-    df.to_excel("data/formatted_import_file.xlsx", index=False)
+    assert_col_valid(df, "ClientStatus", valid_leaner_statuses)
 
 
 valid_tutoring_formats = [
@@ -87,16 +25,17 @@ valid_tutoring_formats = [
     "remote (online)",
     "either / both",
 ]
-def clean_tutoring_format(format: Any) -> str|None:
-    if pandas.isna(format) or format is None:
+def clean_tutoring_format(raw_format: Any) -> str|None:
+    if pandas.isna(raw_format) or raw_format is None:
         return None
+    format = raw_format.lower()
     if "online" in format:
         return "remote (online)"
     if "person" in format:
         return "in person (in public)"
-    if "either" in format:
+    if "either" or "preference" in format:
         return "either / both"
-    return format
+    return None
 
 def geolocate_address(address: str|None) -> Point|None:
     if address is None or pandas.isna(address):
@@ -168,6 +107,58 @@ def get_learners_with_neighbourhoods() -> pandas.DataFrame:
     gdf["neighbourhood"] = gdf['ADMIN_AREA_ABBREVIATION'].apply(get_learner_neighbourhood)
     return gdf
 
+def clean_birthdate(birthdate: Any) -> str|None:
+    if pandas.isna(birthdate) or birthdate is None:
+        return None
+    return pandas.to_datetime(birthdate).strftime("%m/%d/%Y")
+
+
+def extract_postal_code(address: str|None) -> str|None:
+    if pandas.isna(address) or address is None:
+        return None
+    postal_code = re.search(r'[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d', address)
+    if postal_code is None:
+        return None
+    code = postal_code.group(0).upper()
+    return code.replace(" ", "")
+
+def extract_country(address: str|None) -> str|None:
+    if pandas.isna(address) or address is None:
+        return None
+    return "CANADA"
+
+def extract_province(address: str|None) -> str|None:
+    if pandas.isna(address) or address is None:
+        return None
+    return "BC"
+
+def extract_city(address: str|None) -> str|None:
+    if pandas.isna(address) or address is None:
+        return None
+    for city in ["Victoria", "Oak Bay", "Esquimalt", "Langford", "Colwood", "Sooke", "Saanich", "Sidney"]:
+        if city.lower() in address.lower():
+            return city
+    return "Victoria"
+
+def extract_address1(address: str|None) -> str|None:
+    if pandas.isna(address) or address is None:
+        return None
+    postal_code = re.search(r'[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d', address)
+    if postal_code is not None:
+        address = address.replace(postal_code.group(0), "")
+    city = extract_city(address)
+    if city is not None:
+        address = address.replace(city, "")
+        address = address.replace(city.upper(), "")
+        address = address.replace(city.lower(), "")
+    province = re.search(r' [Bb].?[Cc]', address)
+    if province is not None:
+        address = address.replace(province.group(0), "")
+    address = address.strip('., ')
+    if address == "":
+        return None
+    return address
+
 output_column_order = [
     "Salutation",
     "FirstName",
@@ -206,22 +197,62 @@ Data cleaning steps:
 4. Use the first word from "Full Legal Name" for "LegalFirstName"
 5. Use the remainder of "Full Legal Name", after the first word is removed, for "LastName"
 6. Format phone numbers
-7. Format dates (intake date and birtdate)
-8. Format phone numbers
+7. Format dates (intake date and birthdate)
+8. Extract address column into Address1, City, Province, Country, PostalCode
 9. Replace empty required fields with "please update"
 10. Check for duplicate names, emails, or phone numbers
 11. Check that categorical columns only contain valid values
 12. Output file with correct column names and order
 """
 def main():
-    get_learners_with_neighbourhoods()
-    # df = pandas.read_excel("data/learner_intake/adult_learner_import_1.xlsx")
-    # address = df.iloc[0]['address']
-    # print(address)
-    # gmaps = googlemaps.Client(key=os.environ['GOOGLE_MAPS_KEY'])
-    # geocode_result = gmaps.geocode(address)
-    # loc = geocode_result[0]['geometry']['location']
-    # print(loc)
+    df = get_learners_with_neighbourhoods()
+    df['Tutoring Format'] = df['tutoring_method'].apply(clean_tutoring_format)
+    df['FirstName'] = df['preferred_name']
+    df['LegalFirstName'] = df['full_legal_name'].apply(lambda x: x.split(" ")[0])
+    df['LastName'] = df['full_legal_name'].apply(lambda x: " ".join(x.split(" ")[1:]))
+
+    df = df.rename(
+        columns={
+            'pronouns': 'Pronouns',
+            'intake_date': 'DateJoined',
+            'email': 'EmailAddress',
+            'status': 'ClientStatus',
+            'phone': 'HomePhone',
+            'age': 'Age at Intake',
+            'neighbourhood': 'Neighbourhood',
+        }
+    )
+    for column in output_column_order:
+        if column not in df.columns:
+            df[column] = None
+
+    df = clean_phone_numbers(df)
+    df = clean_date_joined(df)
+    df['Birthday'] = df['birthdate'].apply(clean_birthdate)
+
+    # address parts
+    df['PostalCode'] = df['address'].apply(extract_postal_code)
+    df['Country'] = df['address'].apply(extract_country)
+    df['Province'] = df['address'].apply(extract_province)
+    df['City'] = df['address'].apply(extract_city)
+    df['Address1'] = df['address'].apply(extract_address1)
+
+    required_columns = [
+        "FirstName",
+        "LastName",
+        "Address1",
+        "City",
+        "Province",
+        "Country",
+        "PostalCode",
+    ]
+    for col in required_columns:
+        df = please_update_if_empty(df, col)
+
+    check_duplicates(df)
+    validate_statuses(df)
+
+    df[output_column_order].to_excel("data/learner_intake/learner_import_file.xlsx", index=False)
 
 
 if __name__ == '__main__':

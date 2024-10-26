@@ -23,14 +23,14 @@ def clean_phone_numbers(df: pandas.DataFrame) -> pandas.DataFrame:
     df['WorkPhone'] = df['WorkPhone'].apply(clean_phone_number)
     return df
 
-def format_date(date: Any) -> str:
+def format_date_joined(date: Any) -> str:
     if date is None or pandas.isna(date):
         return "01/01/1999"
     return date.strftime("%m/%d/%Y")
 
 def clean_date_joined(df: pandas.DataFrame) -> pandas.DataFrame:
     df['DateJoined'] = pandas.to_datetime(df['DateJoined'])
-    df['DateJoined'] = df['DateJoined'].apply(format_date)
+    df['DateJoined'] = df['DateJoined'].apply(format_date_joined)
     return df
 
 def please_update_if_empty(df: pandas.DataFrame, colName: str) -> pandas.DataFrame:
