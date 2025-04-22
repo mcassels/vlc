@@ -206,6 +206,7 @@ Data cleaning steps:
 """
 def main():
     df = get_learners_with_neighbourhoods()
+    # This column is called "Would you prefer to meet your tutor online or in person?"
     df['Tutoring Format'] = df['tutoring_method'].apply(clean_tutoring_format)
     df['FirstName'] = df['preferred_name']
     df['LegalFirstName'] = df['full_legal_name'].apply(lambda x: x.split(" ")[0])
