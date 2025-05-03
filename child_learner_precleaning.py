@@ -25,9 +25,8 @@ def split_pronouns_from_preferred_name(preferred_name: str|None) -> tuple[str|No
 
 
 def fill_in_preferred_name(row: pandas.Series) -> str|None:
-    if pandas.isna(row['preferred_name']) or row['preferred_name'] is None or row['preferred_name'] == "":
-        first_name = row['full_legal_name'].split(" ")[0]
-        return first_name
+    if (pandas.isna(row['preferred_name']) or row['preferred_name'] is None or row['preferred_name'] == "") and isinstance(row['full_legal_name'], str):
+          return row['full_legal_name'].split(" ")[0]
     return row['preferred_name']
 
 """

@@ -2,10 +2,22 @@ import pandas
 from typing import Any
 import re
 
+def fix_mojibake(text: str) -> str:
+    try:
+        return text.encode("latin1").decode("utf-8")
+    except UnicodeDecodeError:
+        return text
+
 def check_duplicates(df: pandas.DataFrame):
     # No duplicate names
     df['full_name'] = df.apply(lambda x: f"{x['FirstName']} {x['LastName']}", axis=1)
-    assert df['full_name'].nunique() == len(df)
+    name_dupes = df[df.duplicated('full_name', keep=False)]
+    if not name_dupes.empty:
+        print("Duplicate full names found:")
+        print("\n".join(name_dupes['full_name'].drop_duplicates()))
+    assert name_dupes.empty, "Duplicate full names exist"
+    # df['full_name'] = df.apply(lambda x: f"{x['FirstName']} {x['LastName']}", axis=1)
+    # assert df['full_name'].nunique() == len(df)
     # no duplicate emails
     assert len(df[~pandas.isna(df['EmailAddress'])]) == df[~pandas.isna(df['EmailAddress'])]['EmailAddress'].nunique()
     # no duplicate phone numbers

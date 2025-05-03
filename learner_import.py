@@ -1,12 +1,8 @@
 from typing import Any
 import pandas
 import re
-from dotenv import load_dotenv
-import googlemaps
-import os
-from shapely.geometry import Point
 import geopandas
-from common import check_duplicates, clean_phone_numbers, clean_date_joined, please_update_if_empty, assert_col_valid, valid_neighbourhoods
+from common import check_duplicates, clean_phone_numbers, clean_date_joined, please_update_if_empty, assert_col_valid, valid_neighbourhoods, fix_mojibake
 
 
 def validate_statuses(df: pandas.DataFrame):
@@ -36,25 +32,6 @@ def clean_tutoring_format(raw_format: Any) -> str|None:
     if "either" or "preference" in format:
         return "either / both"
     return None
-
-def geolocate_address(address: str|None) -> Point|None:
-    if address is None or pandas.isna(address):
-        return None
-    gmaps = googlemaps.Client(key=os.environ['GOOGLE_MAPS_KEY'])
-    res = gmaps.geocode(address)
-    if len(res) == 0:
-        return None
-    loc = res[0]['geometry']['location']
-    return Point(loc['lng'], loc['lat'])
-
-# Run this first, just once to geolocate the learners,
-# so that we only have to call the google maps api once.
-def write_learners_with_geometries():
-    load_dotenv()
-    df = pandas.read_excel("data/learner_intake/adult_learner_import_1.xlsx")
-    df["geometry"] = df["address"].apply(lambda x: geolocate_address(x))
-    gdf = geopandas.GeoDataFrame(df, geometry="geometry")
-    gdf.to_file("data/learner_intake/learners_with_geometry_2.geojson", driver="GeoJSON")
 
 # "Neighbourhood" options for VLC:
 #
@@ -101,7 +78,7 @@ def get_learner_neighbourhood(admin_area: str|None) -> str|None:
 # Municipality shapes were requested from https://catalogue.data.gov.bc.ca/dataset/municipalities-legally-defined-administrative-areas-of-bc
 def get_learners_with_neighbourhoods() -> pandas.DataFrame:
     municipalities = geopandas.read_file("data/learner_intake/ABMS_MUNICIPALITIES_SP.geojson", driver="GeoJSON")
-    learners = geopandas.read_file("data/learner_intake/learners_with_geometry_2.geojson", driver="GeoJSON")
+    learners = geopandas.read_file("data/learner_intake/may_migration/learners_with_geometry.geojson", driver="GeoJSON")
 
     gdf = geopandas.sjoin(learners, municipalities, how="left")
     gdf["neighbourhood"] = gdf['ADMIN_AREA_ABBREVIATION'].apply(get_learner_neighbourhood)
@@ -110,7 +87,11 @@ def get_learners_with_neighbourhoods() -> pandas.DataFrame:
 def clean_birthdate(birthdate: Any) -> str|None:
     if pandas.isna(birthdate) or birthdate is None:
         return None
-    return pandas.to_datetime(birthdate).strftime("%m/%d/%Y")
+    try:
+        return pandas.to_datetime(birthdate).strftime("%m/%d/%Y")
+    except Exception as e:
+        print(f"Error parsing birthdate: {birthdate}. Using None.")
+        return None
 
 
 def extract_postal_code(address: str|None) -> str|None:
@@ -159,6 +140,23 @@ def extract_address1(address: str|None) -> str|None:
         return None
     return address
 
+def get_notes_on_participation(row: pandas.Series) -> str|None:
+    """
+    If birthdate is missing, add age at intake to the note.
+    """
+    if isinstance(row["Birthday"], str) and len(row["Birthday"]) > 0:
+        return None
+    if isinstance(row["age"], str) and len(row["age"]) > 0:
+        return f"Age at intake: {row['age']}"
+    return None
+
+
+def fill_in_preferred_name(row: pandas.Series) -> str|None:
+    if (pandas.isna(row['preferred_name']) or row['preferred_name'] is None or row['preferred_name'] == "") and isinstance(row['full_legal_name'], str):
+          return row['full_legal_name'].split(" ")[0]
+    return row['preferred_name']
+
+
 output_column_order = [
     "Salutation",
     "FirstName",
@@ -182,11 +180,10 @@ output_column_order = [
     "Birthday",
     "DateJoined",
     "ClientStatus",
-    "Age at Intake",
     "Tutoring Format",
     "Neighbourhood",
     "Parent/Guardian",
-    "Emergency Contact",
+    "Notes on Participation - PRIVATE",
 ]
 
 """
@@ -206,10 +203,11 @@ Data cleaning steps:
 """
 def main():
     df = get_learners_with_neighbourhoods()
+    df = df[~pandas.isna(df['full_legal_name'])]
     # This column is called "Would you prefer to meet your tutor online or in person?"
     df['Tutoring Format'] = df['tutoring_method'].apply(clean_tutoring_format)
-    df['FirstName'] = df['preferred_name']
     df['LegalFirstName'] = df['full_legal_name'].apply(lambda x: x.split(" ")[0])
+    df['FirstName'] = df.apply(fill_in_preferred_name, axis=1)
     df['LastName'] = df['full_legal_name'].apply(lambda x: " ".join(x.split(" ")[1:]))
 
     df = df.rename(
@@ -219,8 +217,8 @@ def main():
             'email': 'EmailAddress',
             'status': 'ClientStatus',
             'phone': 'HomePhone',
-            'age': 'Age at Intake',
             'neighbourhood': 'Neighbourhood',
+            'parent_guardian': 'your name:',
         }
     )
     for column in output_column_order:
@@ -230,6 +228,7 @@ def main():
     df = clean_phone_numbers(df)
     df = clean_date_joined(df)
     df['Birthday'] = df['birthdate'].apply(clean_birthdate)
+    df["Notes on Participation - PRIVATE"] = df.apply(get_notes_on_participation, axis=1)
 
     # address parts
     df['PostalCode'] = df['address'].apply(extract_postal_code)
@@ -253,7 +252,7 @@ def main():
     check_duplicates(df)
     validate_statuses(df)
 
-    df[output_column_order].to_excel("data/learner_intake/learner_import_file.xlsx", index=False)
+    df[output_column_order].to_excel("data/learner_intake/may_migration/learner_import_file.xlsx", index=False)
 
 
 if __name__ == '__main__':
